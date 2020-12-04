@@ -47,6 +47,7 @@
 #define NAME_OF_UTILITY "i.MX M4 Loader"
 #define HEADER NAME_OF_UTILITY " - M4 firmware loader v. " VERSION "\n"
 
+//IMX7D
 #define IMX7D_SRC_M4RCR          (0x3039000C) /* reset register */
 #define IMX7D_STOP_CLEAR_MASK    (0xFFFFFF00)
 #define IMX7D_STOP_SET_MASK      (0x000000AA)
@@ -57,6 +58,7 @@
 #define IMX7D_CCM_ANALOG_PLL_480 (0x303600B0)
 #define IMX7D_CCM_CCGR1          (0x30384010)
 
+//IMX6SX
 #define IMX6SX_SRC_SCR           (0x020D8000) /* reset register */
 #define IMX6SX_STOP_CLEAR_MASK   (0xFFFFFFEF)
 #define IMX6SX_STOP_SET_MASK     (0x00400000)
@@ -66,11 +68,22 @@
 #define IMX6SX_M4_BOOTROM        (0x007F8000) 
 #define IMX6SX_CCM_CCGR3         (0x020C4074)
 
+//imx8mm
+#define IMX8MM_SRC_M4RCR         (0x3039000C)
+#define IMX8MM_STOP_CLEAR_MASK   (0xFFFFFF00)
+#define IMX8MM_STOP_SET_MASK     (0x000000AA)
+#define IMX8MM_START_CLEAR_MASK  (0xFFFFFFFF)
+#define IMX8MM_START_SET_MASK    (0x00000001)
+#define IMX8MM_MU_ATR1            (0x30AA0004)
+#define IMX8MM_M4_BOOTROM         (0x007E0000)//M4 boot ROM: OCRAM_S(0x00180000) or TCML(0x007E0000)
+#define IMX8MM_CCM_ANALOG_PLL_400 (0x30360104)
+#define IMX8MM_CCM_CTRL29         (0x303809D0)
+
 #define MAP_SIZE 4096UL
 #define MAP_MASK (MAP_SIZE - 1)
 #define SIZE_4BYTE 4UL
 #define SIZE_16BYTE 16UL
-#define MAP_OCRAM_SIZE 64 * 1024
+#define MAP_OCRAM_SIZE 128 * 1024
 #define MAP_OCRAM_MASK (MAP_OCRAM_SIZE - 1)
 #define MAX_FILE_SIZE MAP_OCRAM_SIZE
 #define MAX_RETRIES 8
@@ -101,13 +114,20 @@ static int verbose = 0;
 
 void regshow(uint32_t addr, char* name, int fd)
 {
-    off_t target;
+    uint64_t target;
     void *map_base, *virt_addr;
 
     target = (off_t)addr;
+
     map_base = mmap(0, MAP_SIZE, PROT_READ, MAP_SHARED, fd, target & ~MAP_MASK);
-    virt_addr = (unsigned char*)(map_base + (target & MAP_MASK));
-    LogVerbose("%s (0x%08X): 0x%08X\r\n", name, addr, *((unsigned long*)virt_addr));
+    if(map_base == MAP_FAILED){
+        printf("mmap failed!\n");
+        exit(1);
+    }
+
+    virt_addr = (uint32_t*)(map_base + (target & MAP_MASK));
+    LogVerbose("%s (0x%08X): 0x%08X\r\n", name, addr, *((uint32_t*)virt_addr));
+
     munmap(map_base, MAP_SIZE);
 }
 
@@ -128,6 +148,38 @@ void imx6sx_clk_enable(int fd)
     munmap(map_base, MAP_SIZE);
     regshow(IMX6SX_CCM_CCGR3, "CCM_CCGR3", fd);
     LogVerbose("CCM_CCGR3 done\n");
+}
+
+void imx8mm_clk_enable(int fd)
+{
+    #if 1
+    off_t target;
+    void *map_base, *virt_addr;
+
+    LogVerbose("i.MX8MM specific function for M4 clock enabling!\n");
+
+    regshow(IMX8MM_CCM_ANALOG_PLL_400, "CCM_ANALOG_PLL_400", fd);
+    /* Enable parent clock first! */
+    target = (off_t)IMX8MM_CCM_ANALOG_PLL_400;
+    map_base = mmap(0, MAP_SIZE, PROT_READ | PROT_WRITE, MAP_SHARED, fd, target & ~MAP_MASK);
+    virt_addr = (unsigned char*)(map_base + (target & MAP_MASK));
+    /* clock enabled by clearing the bit!  */
+    *((uint32_t*)virt_addr) = (*((uint32_t*)virt_addr)) & (~(1 << 19));
+    *((uint32_t*)virt_addr) = (*((uint32_t*)virt_addr)) | (1<<18);
+    munmap(map_base, MAP_SIZE);
+    regshow(IMX8MM_CCM_ANALOG_PLL_400, "CCM_ANALOG_PLL_400", fd);
+    LogVerbose("CCM_ANALOG_PLL_400 done\n");
+
+    /* ENABLE CLK */
+    regshow(IMX8MM_CCM_CTRL29, "CCM1_CCGR1", fd);
+    target = (off_t)(IMX8MM_CCM_CTRL29+4); /* CCM_CTRL29_SET */
+    map_base = mmap(0, MAP_SIZE, PROT_READ | PROT_WRITE, MAP_SHARED, fd, target & ~MAP_MASK);
+    virt_addr = (unsigned char*)(map_base + (target & MAP_MASK));
+    *((uint32_t*)virt_addr) = 0x00000003;
+    munmap(map_base, MAP_SIZE);
+    regshow(IMX8MM_CCM_CTRL29, "CCM1_CCGR1", fd);
+    LogVerbose("CCM_CCGR1_SET done\n");
+    #endif
 }
 
 void imx7d_clk_enable(int fd)
@@ -162,6 +214,20 @@ void imx7d_clk_enable(int fd)
 
 static struct soc_specific socs[] = {
     {
+        "i.MX8M Mini",
+        IMX8MM_SRC_M4RCR,
+        IMX8MM_STOP_CLEAR_MASK,
+        IMX8MM_STOP_SET_MASK,
+        IMX8MM_START_CLEAR_MASK,
+        IMX8MM_START_SET_MASK,
+        IMX8MM_MU_ATR1,
+
+        imx8mm_clk_enable,
+
+        IMX8MM_M4_BOOTROM
+    },
+
+    {
         "i.MX7 Dual",
         IMX7D_SRC_M4RCR,
         IMX7D_STOP_CLEAR_MASK,
@@ -174,6 +240,7 @@ static struct soc_specific socs[] = {
 
         IMX7D_M4_BOOTROM
     },
+
     {
         "i.MX6 SoloX",
         IMX6SX_SRC_SCR,
@@ -201,7 +268,7 @@ void rpmsg_mu_kick(int fd, int socid, uint32_t vq_id)
     map_base = mmap(0, SIZE_4BYTE, PROT_READ | PROT_WRITE, MAP_SHARED, fd, target & ~MAP_MASK);
     virt_addr = (unsigned char*)(map_base + (target & MAP_MASK));
     vq_id = (vq_id << 16);
-    *((unsigned long*)virt_addr) = vq_id;
+    *((uint32_t*)virt_addr) = vq_id;
     munmap(map_base, SIZE_4BYTE);
 }
 
@@ -212,7 +279,8 @@ void ungate_m4_clk(int fd, int socid)
 
 void stop_cpu(int fd, int socid)
 {
-    unsigned long read_result;
+    #if 1
+    uint32_t read_result;
     off_t target;
     void *map_base, *virt_addr;
 
@@ -223,15 +291,17 @@ void stop_cpu(int fd, int socid)
     target = (off_t)socs[socid].src_m4reg_addr;
     map_base = mmap(0, SIZE_4BYTE, PROT_READ | PROT_WRITE, MAP_SHARED, fd, target & ~MAP_MASK);
     virt_addr = (unsigned char*)(map_base + (target & MAP_MASK));
-    read_result = *((unsigned long*)virt_addr);
-    *((unsigned long*)virt_addr) = (read_result & (socs[socid].stop_and)) | socs[socid].stop_or;
+    read_result = *((uint32_t*)virt_addr);
+    *((uint32_t*)virt_addr) = (read_result & (socs[socid].stop_and)) | socs[socid].stop_or;
     munmap(virt_addr, SIZE_4BYTE);
+
     regshow(socs[socid].src_m4reg_addr, "STOP - after", fd);
+    #endif
 }
 
 void start_cpu(int fd, int socid)
 {
-    unsigned long read_result;
+    uint32_t read_result;
     off_t target;
     void *map_base, *virt_addr;
 
@@ -242,8 +312,8 @@ void start_cpu(int fd, int socid)
     target = (off_t)socs[socid].src_m4reg_addr;
     map_base = mmap(0, SIZE_4BYTE, PROT_READ | PROT_WRITE, MAP_SHARED, fd, target & ~MAP_MASK);
     virt_addr = (unsigned char*)(map_base + (target & MAP_MASK));
-    read_result = *((unsigned long*)virt_addr);
-    *((unsigned long*)virt_addr) = (read_result & (socs[socid].start_and)) | socs[socid].start_or;
+    read_result = *((uint32_t*)virt_addr);
+    *((uint32_t*)virt_addr) = (read_result & (socs[socid].start_and)) | socs[socid].start_or;
     munmap(virt_addr, SIZE_4BYTE);
     regshow(socs[socid].src_m4reg_addr, "START -after", fd);
 }
@@ -251,44 +321,48 @@ void start_cpu(int fd, int socid)
 void set_stack_pc(int fd, int socid, unsigned int stack, unsigned int pc)
 {
     off_t target = (off_t)socs[socid].stack_pc_addr;
-    unsigned long read_result;
     void *map_base, *virt_addr;
     map_base = mmap(0, SIZE_16BYTE, PROT_READ | PROT_WRITE, MAP_SHARED, fd, target & ~MAP_MASK);
     virt_addr = (unsigned char*)(map_base + (target & MAP_MASK));
-    *((unsigned long*)virt_addr) = stack;
+    *((uint32_t*)virt_addr) = stack;
     virt_addr = (unsigned char*)(map_base + ((target + 0x4) & MAP_MASK));
-    *((unsigned long*)virt_addr) = pc;
+    *((uint32_t*)virt_addr) = pc;
     munmap(map_base, SIZE_16BYTE);
 }
 
 int load_m4_fw(int fd, int socid, char* filepath, unsigned int loadaddr)
 {
-    int n;
+    int n,count;
     int size;
     FILE* fdf;
     off_t target;
-    char* filebuffer;
+    uint8_t * filebuffer;
     void *map_base, *virt_addr;
-    unsigned long stack, pc;
+    unsigned int stack, pc;
 
-    fdf = fopen(filepath, "rb");
+    fdf = fopen(filepath, "rb+");
     fseek(fdf, 0, SEEK_END);
     size = ftell(fdf);
-    fseek(fdf, 0, SEEK_SET);
-    if (size > MAX_FILE_SIZE) {
-        LogError("%s - File size too big, can't load: %d > %d \n", NAME_OF_UTILITY, size, MAX_FILE_SIZE);
-        return -2;
-    }
-    filebuffer = (char*)malloc(size + 1);
-    if (size != fread(filebuffer, sizeof(char), size, fdf)) {
-        free(filebuffer);
-        return -2;
-    }
 
+    printf("fdf=%p\n",fdf);
+    printf("size=%d\n",size);
+
+    fseek(fdf, 0, SEEK_SET);
+    filebuffer = (uint8_t*)malloc((size+1));
+
+    for(int i=0;i<size;i++){
+        if(fread(&filebuffer[i],sizeof(uint8_t),1,fdf)!=1){
+            if(feof(fdf)){
+                fclose(fdf);
+            }
+            printf("file read error!\n");
+        }
+    }
     fclose(fdf);
 
     stack = (filebuffer[0] | (filebuffer[1] << 8) | (filebuffer[2] << 16) | (filebuffer[3] << 24));
     pc = (filebuffer[4] | (filebuffer[5] << 8) | (filebuffer[6] << 16) | (filebuffer[7] << 24));
+    printf("test 7\n");
 
     if (loadaddr == 0x0) {
         loadaddr = pc & 0xFFFF0000; /* Align */
@@ -298,7 +372,7 @@ int load_m4_fw(int fd, int socid, char* filepath, unsigned int loadaddr)
     map_base = mmap(0, MAP_OCRAM_SIZE, PROT_READ | PROT_WRITE, MAP_SHARED, fd, loadaddr & ~MAP_OCRAM_MASK);
     LogVerbose("%s - start - end (0x%08x - 0x%08x)\n", NAME_OF_UTILITY, loadaddr & ~MAP_OCRAM_MASK, (loadaddr & ~MAP_OCRAM_MASK) + MAP_OCRAM_SIZE);
     virt_addr = (unsigned char*)(map_base + (loadaddr & MAP_OCRAM_MASK));
-    memcpy(virt_addr, filebuffer, size);
+    memcpy(virt_addr, filebuffer, size + 8 - (size % 8));
     munmap(map_base, MAP_OCRAM_SIZE);
 
     LogVerbose("Will set PC and STACK...");
@@ -309,44 +383,18 @@ int load_m4_fw(int fd, int socid, char* filepath, unsigned int loadaddr)
     return size;
 }
 
-int get_board_id(void)
-{
-    int i;
-    char out[512];
-    int result = -1;
-    FILE* fp;
-
-    fp = fopen("/proc/cpuinfo", "r");
-    if (fp == NULL)
-        return result;
-
-    while (fgets(out, sizeof(out) - 1, fp) != NULL) {
-        if (strstr(out, "Hardware")) {
-            for (i = 0; i < (sizeof(socs) / sizeof(struct soc_specific)); i++) {
-                if (strstr(out, socs[i].detect_name)) {
-                    result = i;
-                    break;
-                }
-            }
-            break;
-        }
-    }
-
-    fclose(fp);
-    return result;
-}
 
 int main(int argc, char** argv)
 {
     int fd, n;
-    unsigned long loadaddr;
+    uint32_t loadaddr;
     char* p;
     char m4IsStopped = 0;
     char m4IsRunning = 0;
     int m4TraceFlags = 0;
     int m4Retry;
     char* filepath = argv[1];
-    int currentSoC = -1;
+    int currentSoC = 0;//for imx8m mini
 
     if (argc < 2) {
         LogError(HEADER);
@@ -356,13 +404,6 @@ int main(int argc, char** argv)
                  "or: %s start                   # releases the auxiliary core from reset\n"
                  "or: %s kick [n]                # triggers interrupt on RPMsg virtqueue n\n",
             NAME_OF_UTILITY, argv[0], argv[0], argv[0], argv[0], argv[0]);
-        return RETURN_CODE_ARGUMENTS_ERROR;
-    }
-
-    currentSoC = get_board_id();
-    if (currentSoC == -1) {
-        LogError(HEADER);
-        LogError("Board is not supported.\n");
         return RETURN_CODE_ARGUMENTS_ERROR;
     }
 
