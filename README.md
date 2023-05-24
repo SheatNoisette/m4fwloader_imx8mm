@@ -1,21 +1,30 @@
-# imx-m4fwloader
-Tool for loading firmware to M4 core on i.MX6SX and i.MX7D from Linux user space.
+# m4fwloader_imx8mm
+Tool for loading firmware to M4 core on i.MX8M Mini from Linux Userspace.
+Original source code from NXP by marek.novak@nxp.com, modified from
+nsdrude-varigit.
 
-### How to use this
-- Use the environment provided to you by Yocto:
-	- For example:
-	- ``source /opt/poky/1.8/environment-setup-cortexa9hf-vfp-neon-poky-linux-gnueabi``
-	- ``$CC m4fwloader.c -o m4fwloader``
-	- You get m4fwloader binary...
-- Then you need to build your M4 application and link it to some address. (e.g 0x00910000, try: https://github.com/EmbeddedRPC/erpc-imx-demos/tree/master/MCU/example_rpmsg)
-- Load it using m4fwloader: ``./m4fwloader myapp.bin 0x00910000``
-- Optionally use --verbose parameter to see what is written to each registers
-- Warning: Use this tool for debugging only, since it accesses directly the registers from the user space and requires therefore root priviledges!
-- You have been warned... :-)
-- Optionally, you can trigger an interrupt using message unit (MU) to the M4 core to get RPMsg started - this is normally done by Linux Kernel during startup: ``./m4fwloader kick 0`` 
-- Whole usage is here:
-	- ``m4fwloader [filename.bin] [0xLOADADDR] [--verbose]``  # loads new firmware  
-	- or: ``m4fwloader stop``                    # holds the auxiliary core in reset  
-	- or: ``m4fwloader start``                   # releases the auxiliary core from reset  
-	- or: ``m4fwloader kick [n]``                # triggers interrupt on RPMsg virtqueue n
-- by Marek Novak: marek.novak@nxp.com
+This approach is not recommended by NXP, but it is useful for development
+and debugging. Uboot should be used to load the firmware in production.
+
+# Usage
+
+To flash the firmware to the M4 core, use the following command:
+```bash
+$ m4fwloader 0x7E0000 your_firmware.bin
+```
+Please note that you must be root to run this command and you may need
+to load a dummy firmware before Linux first to be able to load the real
+firmware you want to use.
+
+# Building
+
+To build the tool, you need to have a adequate aarch64 toolchain installed.
+Then you can build the tool by running:
+```bash
+$ make
+```
+
+# License
+This program is licensed under the GPL version 2.0. For details see the file
+`LICENSE` in the top-level directory.
+Original code by Marek Novak: marek.novak@nxp.com
