@@ -1,9 +1,10 @@
 /*
  * m4fwloader - based on mqx_upload_on_m4SoloX
  *              from Giuseppe Pagano
- *               
+ *              Modified by SheatNoisette
+ *
  * Tool to control M4 AMP core from Linux user-space
- * 
+ *
  * Copyright (C) 2015-2016 Giuseppe Pagano <giuseppe.pagano@seco.com>
  * Copyright 2017 NXP
  *
@@ -16,7 +17,7 @@
  * but WITHOUT ANY WARRANTY; without even the implied warranty of
  * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
  * GNU General Public License for more details.
- * 
+ *
  * You should have received a copy of the GNU General Public License
  * along with this program; if not, write to the Free Software
  * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
@@ -46,27 +47,6 @@
 #define VERSION "1.0.0"
 #define NAME_OF_UTILITY "i.MX M4 Loader"
 #define HEADER NAME_OF_UTILITY " - M4 firmware loader v. " VERSION "\n"
-
-//IMX7D
-#define IMX7D_SRC_M4RCR          (0x3039000C) /* reset register */
-#define IMX7D_STOP_CLEAR_MASK    (0xFFFFFF00)
-#define IMX7D_STOP_SET_MASK      (0x000000AA)
-#define IMX7D_START_CLEAR_MASK   (0xFFFFFFFF)
-#define IMX7D_START_SET_MASK     (0x00000001)
-#define IMX7D_MU_ATR1            (0x30AA0004) /* rpmsg_mu_kick_addr */
-#define IMX7D_M4_BOOTROM         (0x00180000) 
-#define IMX7D_CCM_ANALOG_PLL_480 (0x303600B0)
-#define IMX7D_CCM_CCGR1          (0x30384010)
-
-//IMX6SX
-#define IMX6SX_SRC_SCR           (0x020D8000) /* reset register */
-#define IMX6SX_STOP_CLEAR_MASK   (0xFFFFFFEF)
-#define IMX6SX_STOP_SET_MASK     (0x00400000)
-#define IMX6SX_START_CLEAR_MASK  (0xFFFFFFFF)
-#define IMX6SX_START_SET_MASK    (0x00400010)
-#define IMX6SX_MU_ATR1           (0x02294004) /* rpmsg_mu_kick_addr */
-#define IMX6SX_M4_BOOTROM        (0x007F8000) 
-#define IMX6SX_CCM_CCGR3         (0x020C4074)
 
 //imx8mm
 #define IMX8MM_SRC_M4RCR         (0x3039000C)
@@ -131,25 +111,6 @@ void regshow(uint32_t addr, char* name, int fd)
     munmap(map_base, MAP_SIZE);
 }
 
-void imx6sx_clk_enable(int fd)
-{
-    off_t target;
-    unsigned long read_result;
-    void *map_base, *virt_addr;
-
-    LogVerbose("i.MX6SX specific function for M4 clock enabling!\n");
-
-    regshow(IMX6SX_CCM_CCGR3, "CCM_CCGR3", fd);
-    target = (off_t)IMX6SX_CCM_CCGR3; /* M4 Clock gate*/
-    map_base = mmap(0, MAP_SIZE, PROT_READ | PROT_WRITE, MAP_SHARED, fd, target & ~MAP_MASK);
-    virt_addr = (unsigned char*)(map_base + (target & MAP_MASK));
-    read_result = *((unsigned long*)virt_addr);
-    *((unsigned long*)virt_addr) = read_result | 0x0000000C;
-    munmap(map_base, MAP_SIZE);
-    regshow(IMX6SX_CCM_CCGR3, "CCM_CCGR3", fd);
-    LogVerbose("CCM_CCGR3 done\n");
-}
-
 void imx8mm_clk_enable(int fd)
 {
     #if 1
@@ -182,36 +143,6 @@ void imx8mm_clk_enable(int fd)
     #endif
 }
 
-void imx7d_clk_enable(int fd)
-{
-    off_t target;
-    unsigned long read_result;
-    void *map_base, *virt_addr;
-
-    LogVerbose("i.MX7D specific function for M4 clock enabling!\n");
-
-    regshow(IMX7D_CCM_ANALOG_PLL_480, "CCM_ANALOG_PLL_480", fd);
-    /* Enable parent clock first! */
-    target = (off_t)IMX7D_CCM_ANALOG_PLL_480;
-    map_base = mmap(0, MAP_SIZE, PROT_READ | PROT_WRITE, MAP_SHARED, fd, target & ~MAP_MASK);
-    virt_addr = (unsigned char*)(map_base + (target & MAP_MASK));
-    /* clock enabled by clearing the bit!  */
-    *((unsigned long*)virt_addr) = (*((unsigned long*)virt_addr)) & (~(1 << 5));
-    munmap(map_base, MAP_SIZE);
-    regshow(IMX7D_CCM_ANALOG_PLL_480, "CCM_ANALOG_PLL_480", fd);
-    LogVerbose("CCM_ANALOG_PLL_480 done\n");
-
-    /* ENABLE CLK */
-    regshow(IMX7D_CCM_CCGR1, "CCM1_CCGR1", fd);
-    target = (off_t)(IMX7D_CCM_CCGR1+4); /* CCM_CCGR1_SET */
-    map_base = mmap(0, MAP_SIZE, PROT_READ | PROT_WRITE, MAP_SHARED, fd, target & ~MAP_MASK);
-    virt_addr = (unsigned char*)(map_base + (target & MAP_MASK));
-    *((unsigned long*)virt_addr) = 0x00000003;
-    munmap(map_base, MAP_SIZE);
-    regshow(IMX7D_CCM_CCGR1, "CCM1_CCGR1", fd);
-    LogVerbose("CCM_CCGR1_SET done\n");
-}
-
 static struct soc_specific socs[] = {
     {
         "i.MX8M Mini",
@@ -225,34 +156,6 @@ static struct soc_specific socs[] = {
         imx8mm_clk_enable,
 
         IMX8MM_M4_BOOTROM
-    },
-
-    {
-        "i.MX7 Dual",
-        IMX7D_SRC_M4RCR,
-        IMX7D_STOP_CLEAR_MASK,
-        IMX7D_STOP_SET_MASK,
-        IMX7D_START_CLEAR_MASK,
-        IMX7D_START_SET_MASK,
-        IMX7D_MU_ATR1,
-
-        imx7d_clk_enable,
-
-        IMX7D_M4_BOOTROM
-    },
-
-    {
-        "i.MX6 SoloX",
-        IMX6SX_SRC_SCR,
-        IMX6SX_STOP_CLEAR_MASK,
-        IMX6SX_STOP_SET_MASK,
-        IMX6SX_START_CLEAR_MASK,
-        IMX6SX_START_SET_MASK,
-        IMX6SX_MU_ATR1,
-
-        imx6sx_clk_enable,
-
-        IMX6SX_M4_BOOTROM
     }
 };
 
@@ -332,10 +235,8 @@ void set_stack_pc(int fd, int socid, unsigned int stack, unsigned int pc)
 
 int load_m4_fw(int fd, int socid, char* filepath, unsigned int loadaddr)
 {
-    int n,count;
     int size;
     FILE* fdf;
-    off_t target;
     uint8_t * filebuffer;
     void *map_base, *virt_addr;
     unsigned int stack, pc;
@@ -386,13 +287,9 @@ int load_m4_fw(int fd, int socid, char* filepath, unsigned int loadaddr)
 
 int main(int argc, char** argv)
 {
-    int fd, n;
+    int fd;
     uint32_t loadaddr;
     char* p;
-    char m4IsStopped = 0;
-    char m4IsRunning = 0;
-    int m4TraceFlags = 0;
-    int m4Retry;
     char* filepath = argv[1];
     int currentSoC = 0;//for imx8m mini
 
@@ -403,7 +300,7 @@ int main(int argc, char** argv)
                  "or: %s stop                    # holds the auxiliary core in reset\n"
                  "or: %s start                   # releases the auxiliary core from reset\n"
                  "or: %s kick [n]                # triggers interrupt on RPMsg virtqueue n\n",
-            NAME_OF_UTILITY, argv[0], argv[0], argv[0], argv[0], argv[0]);
+            NAME_OF_UTILITY, argv[0], argv[0], argv[0], argv[0]);
         return RETURN_CODE_ARGUMENTS_ERROR;
     }
 
